@@ -5,7 +5,7 @@ steps:
 python3 -m venv env
 source ./env/bin/activate
 
-2)pip -e install .
+2)pip install -e .
 
 3)Start using the tool
 $iwx-datavalidation-tool --name Rockstar
