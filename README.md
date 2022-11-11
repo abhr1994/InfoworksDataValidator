@@ -9,5 +9,5 @@ source ./env/bin/activate
 
 3)Start using the tool
 $iwx-datavalidation-tool --name Rockstar
-Welcome to Infoworks Data Validator Tool! Nitin
+Welcome to Infoworks Data Validator Tool! Rockstar
 
