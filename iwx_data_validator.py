@@ -275,8 +275,8 @@ def prepare_sql_import_query_columnchksum(compute_type, domain_id, pipeline_id, 
         if len(src_columns_with_datatype) > 0:
             columns_to_select_row_validation = [i for i in src_columns if (not i.lower().startswith("ziw"))]
             if compute_type.lower() == "bigquery":
-                # Bigquery supports only 1 column in count distinct
-                columns_to_select_row_validation = columns_to_select_row_validation[0]
+                # Bigquery supports only 1 column in count distinct. Hence, hash the inputs and then pass it to distinct count
+                columns_to_select_row_validation = ["sha256(concat( " + ",".join([f"cast({i} as string)" for i in columns_to_select_row_validation]) + " ))"]
         else:
             columns_to_select_row_validation = []
     count_expression = "1"
