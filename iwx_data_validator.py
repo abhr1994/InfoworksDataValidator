@@ -7,7 +7,7 @@ import csv
 import click
 import urllib
 from colorama import Fore, Style
-
+import sqlparse
 MAX_RETRIES = 20
 session = requests.Session()
 adapter = requests.adapters.HTTPAdapter(max_retries=MAX_RETRIES)
@@ -162,7 +162,7 @@ def import_sql(sql, domain_id, pipeline_id):
             return True
         else:
             print_error("Failed to import sql \n")
-            print_error(parsed_response)
+            print_error(json.dumps(parsed_response))
             return False
     except Exception as e:
         print_error("Failed to import sql \n")
@@ -182,7 +182,7 @@ def get_all_columns(source_name, table_name):
         result = response.json().get("result", [])
         source_id = result[0]["id"]
         source_type = result[0]["type"].lower()
-        source_sub_type = result[0]["source_sub_type"].lower()
+        source_sub_type = result[0]["sub_type"].lower()
         environment_id = result[0]["environment_id"]
         compute_type = get_environment_type_from_id(environment_id).lower()
         if source_id is not None:
@@ -267,15 +267,20 @@ def prepare_sql_import_query_columnchksum(compute_type, domain_id, pipeline_id, 
             grp_by_cols_to_select.append(f"{item_modified}")
 
     # For row validation
+    if distinct_count_cols == "" or distinct_count_cols is None:
+        distinct_count_cols = []
     if len(distinct_count_cols) > 0:
         columns_to_select_row_validation = distinct_count_cols
     else:
         if len(src_columns_with_datatype) > 0:
             columns_to_select_row_validation = [i for i in src_columns if (not i.lower().startswith("ziw"))]
+            if compute_type.lower() == "bigquery":
+                # Bigquery supports only 1 column in count distinct
+                columns_to_select_row_validation = columns_to_select_row_validation[0]
         else:
             columns_to_select_row_validation = []
     count_expression = "1"
-    distinct_count_expression = f"DISTINCT({','.join(columns_to_select_row_validation)}) "
+    distinct_count_expression = f"DISTINCT {','.join(columns_to_select_row_validation)} "
 
     if len(chksum_cols) == 0:
         columns_to_select = []
@@ -386,7 +391,8 @@ def prepare_sql_import_query_columnchksum(compute_type, domain_id, pipeline_id, 
         """ + ","
     select_clause = select_clause.strip(",")
     sql = f"""INSERT INTO "{pipeline_tgt_schema_name}"."{pipeline_tgt_table_name}" SELECT '{tgt_table}' as ENTITY_NAME, {select_clause} , {COL_CKSUM_VALIDATION} AS COL_CKSUM_VALIDATION, {DUPLICATE_CHECK} as DUPLICATE_CHECK, case when source_count - target_count = 0 then 'PASS' else 'FAIL' END AS COUNT_VALIDATION, {" , ".join(grp_by_cols_to_select)} FROM ( SELECT {",".join(select_cols_staging)}, {" , ".join(grp_by_cols_to_select)} FROM ( SELECT {" , ".join(grp_by_statement)}  FROM "{src_schema}"."{src_table}" ) GROUP BY {",".join(grp_by_cols_to_select)} ) AS SRC_BRANCH FULL OUTER JOIN ( SELECT {",".join(select_cols_landing)}, {" , ".join(grp_by_cols_to_select)} FROM ( SELECT {",".join(grp_by_statement)}  FROM "{tgt_schema}"."{tgt_table}" ) GROUP BY {",".join(grp_by_cols_to_select)} ) AS TGT_BRANCH ON {join_clause} """
-    print_info("prepared following sql for column checksum pipeline: " + sql)
+    print_info("prepared following sql for column checksum pipeline: ")
+    print(sqlparse.format(sql, reindent=True, keyword_case='upper'))
     print("\n\n")
     return import_sql(sql, domain_id, pipeline_id), select_cols, grp_by_cols_to_select
 
@@ -451,9 +457,9 @@ def prepare_sql_import_query_rowhashvalidation(compute_type, domain_id, pipeline
     else:
         sql = f"""INSERT INTO "{pipeline_tgt_schema_name}"."{pipeline_tgt_table_name}" SELECT '{tgt_table}' as ENTITY_NAME, {",".join(col_chksum_table_columns)}, {",".join([i.strip() + "_SRC" for i in columns_to_select])}, {",".join([i.strip() + "_TGT" for i in columns_to_select])} , CASE WHEN ROW_HASH_SOURCE != ROW_HASH_TARGET THEN 'FAIL' ELSE 'PASS' END AS ROW_HASH_VALIDATION FROM ( SELECT * FROM ( SELECT {ROW_HASH} AS ROW_HASH_SOURCE , * FROM ( SELECT {",".join(columns_to_select_src)} FROM ( select * , {",".join(columns_to_select_inner)} from "{src_schema}"."{src_table}" ) AS SRC_TABLE INNER JOIN ( SELECT {",".join(col_chksum_table_columns)} FROM "{colchksum_table_schema}"."{colchksum_table_name}" WHERE COL_CKSUM_VALIDATION = 'FAIL' ) AS COLCHSUM_TABLE ON {src_inner_join_clause} ) AS SOURCE_BRANCH ) FULL OUTER JOIN ( SELECT {ROW_HASH} AS ROW_HASH_TARGET , * FROM ( SELECT {",".join(columns_to_select_tgt)} FROM ( select * , {",".join(columns_to_select_inner)} from "{tgt_schema}"."{tgt_table}" ) AS TGT_TABLE INNER JOIN ( SELECT {",".join(col_chksum_table_columns)} FROM "{colchksum_table_schema}"."{colchksum_table_name}" WHERE COL_CKSUM_VALIDATION = 'FAIL' ) AS COLCHSUM_TABLE ON {tgt_inner_join_clause} ) ) AS TARGET_BRANCH ON {FULL_OUTER_JOIN_CLAUSE} )"""
 
-    print_info("prepared following sql for row checksum pipeline: " + sql)
+    print_info("prepared following sql for row checksum pipeline: ")
+    print(sqlparse.format(sql, reindent=True, keyword_case='upper'))
     print("\n\n")
-
     return import_sql(sql, domain_id, pipeline_id)
 
 
@@ -490,7 +496,8 @@ def prepare_sql_import_query_datavalidation_summary(domain_id, pipeline_id, colc
 
     sql = f"""INSERT INTO "{pipeline_tgt_schema_name}"."{pipeline_tgt_table_name}" SELECT {final_columns_to_select} FROM ( SELECT * FROM ( SELECT {','.join(src_columns_for_chksum)}, {','.join(grp_by_cols_to_select)} FROM "{colchksum_table_schema}"."{colchksum_table_name}") TABLE_A FULL OUTER JOIN ( SELECT {','.join(grp_by_cols_to_select)} , COUNT(1) AS NUMBER_OF_MISMATCHED_ROWS_TEMP FROM "{rowchksum_table_schema}"."{rowchksum_table_name}" WHERE "row_hash_validation" = 'FAIL' GROUP BY {','.join(grp_by_cols_to_select)} ) TABLE_B ON {grp_by_clause} )"""
 
-    print_info("prepared following sql for data validation summary pipeline: " + sql)
+    print_info("prepared following sql for data validation summary pipeline: ")
+    print(sqlparse.format(sql, reindent=True, keyword_case='upper'))
     print("\n\n")
     return import_sql(sql, domain_id, pipeline_id)
 
@@ -652,12 +659,12 @@ def create_import_validation_pipelines(i, q):
             target_table_name = row["target_table_name"]
             source_name = row['source_name']
             target_name = row['target_name']
-            group_by_cols_for_checksum = row["group_by_cols_for_checksum"]
-            agg_cols_for_checksum = row["agg_cols_for_checksum"]
-            distinct_count_cols = row["distinct_count_cols"]
-            join_cols_row_checksum = row["join_cols_row_checksum"]
-            pipeline_tgt_schema_name = row['pipeline_tgt_dataset_name']
-            natural_keys = row['natural_keys'].split(",") if row['natural_keys'] != "" else []
+            group_by_cols_for_checksum = row['group_by_cols_for_checksum'].split(",") if row['group_by_cols_for_checksum'] != "" and row['group_by_cols_for_checksum'] is not None else []
+            agg_cols_for_checksum = row['agg_cols_for_checksum'].split(",") if row['agg_cols_for_checksum'] != "" and row['agg_cols_for_checksum'] is not None else []
+            distinct_count_cols = row['distinct_count_cols'].split(",") if row['distinct_count_cols'] != "" and row['distinct_count_cols'] is not None else []
+            join_cols_row_checksum = row['join_cols_row_checksum'].split(",") if row['join_cols_row_checksum'] != "" and row['join_cols_row_checksum'] is not None else []
+            pipeline_tgt_schema_name = row['pipeline_target_schema_name']
+            natural_keys = row['natural_keys'].split(",") if row['natural_keys'] != "" and row['natural_keys'] is not None else []
             regex_exp = row["regex_exp"] if row["regex_exp"] != "" else None
             regex_replace = row["regex_replace"] if row["regex_replace"] != "" else "False"
             if regex_replace.lower() not in ["true", "false"]:
@@ -666,12 +673,10 @@ def create_import_validation_pipelines(i, q):
             data_profiling = row["data_profiling"] if row["data_profiling"] != "" else "True"
             if data_profiling.lower() not in ["true", "false"]:
                 data_profiling = "False"
-            skip_column_name_and_datatype_validation = row["skip_column_name_and_datatype_validation"] if row[
-                                                                                                              "skip_column_name_and_datatype_validation"] != "" else "True"
+            skip_column_name_and_datatype_validation = row["skip_column_name_and_datatype_validation"] if row["skip_column_name_and_datatype_validation"] != "" else "True"
             if skip_column_name_and_datatype_validation.lower() not in ["true", "false"]:
                 skip_column_name_and_datatype_validation = eval(skip_column_name_and_datatype_validation.title())
-            remove_ascii_from_cols = row["remove_ascii_from_cols"].split(",") if row[
-                                                                                     "remove_ascii_from_cols"] != "" else None
+            remove_ascii_from_cols = row["remove_ascii_from_cols"].split(",") if row["remove_ascii_from_cols"] != "" and row['remove_ascii_from_cols'] is not None else None
 
             tgt_columns_with_datatype = get_all_columns(source_name, target_table_name)
             src_columns_with_datatype = get_all_columns(target_name, source_table_name)
@@ -776,11 +781,11 @@ def create_import_validation_pipelines(i, q):
                 if pipeline_id_rowhash is not None:
                     tgt_properties_to_update = {"build_mode": "OVERWRITE",
                                                 "natural_keys": natural_keys}
-                    modify_active_version_pipeline(domain_id, pipeline_id_colchksum, tgt_properties_to_update)
+                    modify_active_version_pipeline(domain_id, pipeline_id_rowhash, tgt_properties_to_update)
                 if pipeline_id_datavalidation is not None:
                     tgt_properties_to_update = {"build_mode": "APPEND",
                                                 "natural_keys": natural_keys}
-                    modify_active_version_pipeline(domain_id, pipeline_id_colchksum, tgt_properties_to_update)
+                    modify_active_version_pipeline(domain_id, pipeline_id_datavalidation, tgt_properties_to_update)
 
             elif compute_type.lower() == "spark":
                 if pipeline_id_colchksum is not None and pipeline_id_rowhash is not None and pipeline_id_datavalidation is not None:
@@ -795,13 +800,13 @@ def create_import_validation_pipelines(i, q):
                                                     "target_base_path": f"/{pipeline_tgt_schema_name}/{pipeline_suffix}_row_hash_validation",
                                                     "storage_format": "delta",
                                                     "natural_key": natural_keys}
-                        modify_active_version_pipeline(domain_id, pipeline_id_colchksum, tgt_properties_to_update)
+                        modify_active_version_pipeline(domain_id, pipeline_id_rowhash, tgt_properties_to_update)
                     if pipeline_id_datavalidation is not None:
                         tgt_properties_to_update = {"sync_type": "APPEND",
                                                     "target_base_path": f"/{pipeline_tgt_schema_name}/{pipeline_suffix}_datavalidation_summary",
                                                     "storage_format": "delta",
                                                     "natural_key": natural_keys}
-                        modify_active_version_pipeline(domain_id, pipeline_id_colchksum, tgt_properties_to_update)
+                        modify_active_version_pipeline(domain_id, pipeline_id_datavalidation, tgt_properties_to_update)
             else:
                 pass
         except Exception as e:
@@ -880,6 +885,7 @@ def main(pipeline_suffix, validation_type, source_table_name, target_table_name,
 
     global refresh_token
     refresh_token = config.get('environment_details', 'refresh_token')
+    refresh_delegation_token()
     if domain_name is None:
         # Read from config.ini
         domain_id = config.get('environment_details', 'domain_id')

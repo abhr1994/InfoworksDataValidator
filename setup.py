@@ -14,7 +14,7 @@ setuptools.setup(
     url="https://github.com/abhr1994/InfoworksDataValidator",
     packages=setuptools.find_packages(),
     install_requires=[
-        'requests', 'click', 'colorama'
+        'requests', 'click', 'colorama', 'sqlparse'
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
