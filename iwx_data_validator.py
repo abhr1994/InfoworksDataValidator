@@ -792,19 +792,19 @@ def create_import_validation_pipelines(i, q):
                     if pipeline_id_colchksum is not None:
                         tgt_properties_to_update = {"sync_type": "OVERWRITE",
                                                     "target_base_path": f"/{pipeline_tgt_schema_name}/{pipeline_suffix}_column_hash_validation",
-                                                    "storage_format": "delta",
+                                                    "storage_format": "orc",
                                                     "natural_key": natural_keys}
                         modify_active_version_pipeline(domain_id, pipeline_id_colchksum, tgt_properties_to_update)
                     if pipeline_id_rowhash is not None:
                         tgt_properties_to_update = {"sync_type": "OVERWRITE",
                                                     "target_base_path": f"/{pipeline_tgt_schema_name}/{pipeline_suffix}_row_hash_validation",
-                                                    "storage_format": "delta",
+                                                    "storage_format": "orc",
                                                     "natural_key": natural_keys}
                         modify_active_version_pipeline(domain_id, pipeline_id_rowhash, tgt_properties_to_update)
                     if pipeline_id_datavalidation is not None:
                         tgt_properties_to_update = {"sync_type": "APPEND",
                                                     "target_base_path": f"/{pipeline_tgt_schema_name}/{pipeline_suffix}_datavalidation_summary",
-                                                    "storage_format": "delta",
+                                                    "storage_format": "orc",
                                                     "natural_key": natural_keys}
                         modify_active_version_pipeline(domain_id, pipeline_id_datavalidation, tgt_properties_to_update)
             else:
