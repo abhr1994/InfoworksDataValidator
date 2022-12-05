@@ -729,7 +729,7 @@ def create_import_validation_pipelines(i, q):
                                                              environment_id, storage_id, compute_id)
 
             if column_checksum_validation and pipeline_id_colchksum is not None:
-                pipeline_tgt_table_name = "COLUMN_CHECKSUM_VALIDATION_RESULTS"
+                pipeline_tgt_table_name = f"{pipeline_suffix.upper()}_COLUMN_CHECKSUM_VALIDATION_RESULTS"
                 result, col_chksum_select_cols, grp_by_cols = prepare_sql_import_query_columnchksum(compute_type,
                                                                                                     domain_id,
                                                                                                     pipeline_id_colchksum,
@@ -749,8 +749,8 @@ def create_import_validation_pipelines(i, q):
                     trigger_pipeline_metadata_build(domain_id, pipeline_id_colchksum)
 
             if row_checksum_validation and pipeline_id_rowhash is not None:
-                pipeline_tgt_table_name = "ROW_CHECKSUM_VALIDATION_RESULTS"
-                colchksum_table = f"{pipeline_tgt_schema_name}.COLUMN_CHECKSUM_VALIDATION_RESULTS"
+                pipeline_tgt_table_name = f"{pipeline_suffix.upper()}_ROW_CHECKSUM_VALIDATION_RESULTS"
+                colchksum_table = f"{pipeline_tgt_schema_name}.{pipeline_suffix.upper()}_COLUMN_CHECKSUM_VALIDATION_RESULTS"
                 inner_join_cols = group_by_cols_for_checksum
                 result = prepare_sql_import_query_rowhashvalidation(compute_type, domain_id, pipeline_id_rowhash,
                                                                     source_table_name,
@@ -765,10 +765,10 @@ def create_import_validation_pipelines(i, q):
 
             if datavalidation_summary and pipeline_id_datavalidation is not None:
                 prepare_sql_import_query_datavalidation_summary(domain_id, pipeline_id_datavalidation,
-                                                                f"{pipeline_tgt_schema_name}.COLUMN_CHECKSUM_VALIDATION_RESULTS",
-                                                                f"{pipeline_tgt_schema_name}.ROW_CHECKSUM_VALIDATION_RESULTS",
+                                                                f"{pipeline_tgt_schema_name}.{pipeline_suffix.upper()}_COLUMN_CHECKSUM_VALIDATION_RESULTS",
+                                                                f"{pipeline_tgt_schema_name}.{pipeline_suffix.upper()}_ROW_CHECKSUM_VALIDATION_RESULTS",
                                                                 pipeline_tgt_schema_name,
-                                                                "DATAVALIDATION_SUMMARY_RESULTS",
+                                                                f"{pipeline_suffix.upper()}_DATAVALIDATION_SUMMARY_RESULTS",
                                                                 col_chksum_select_cols,
                                                                 grp_by_cols,
                                                                 target_table_name.split(".")[-1])
